@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js Shape Carousel</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #0a0a0a, #1a1a2e, #16213e);
+            overflow-x: hidden;
+        }
+
+        #container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+        }
+
+        #info {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 18px;
+            z-index: 10;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 20px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+
+        #instructions {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            text-align: center;
+            z-index: 10;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 15px 30px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+
+        .scroll-indicator {
+            position: fixed;
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: white;
+            font-size: 24px;
+            animation: bounce 2s infinite;
+            z-index: 10;
+        }
+
+        @keyframes bounce {
+            0%, 20%, 50%, 80%, 100% {
+                transform: translateY(-50%);
+            }
+            40% {
+                transform: translateY(-60%);
+            }
+            60% {
+                transform: translateY(-40%);
+            }
+        }
+
+        @media (max-width: 768px) {
+            #info {
+                font-size: 14px;
+                padding: 8px 15px;
+            }
+
+            #instructions {
+                font-size: 12px;
+                padding: 10px 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+    <div id="info">شکل ۱: مکعب</div>
+    <div id="instructions">برای دیدن شکل بعدی صفحه را اسکرول کنید</div>
+    <div class="scroll-indicator">↓</div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Scene setup
+        let scene, camera, renderer;
+        let currentShapeIndex = 0;
+        let meshes = [];
+        let hitboxes = [];
+        const sectionHeight = 30; // Increased distance between shapes
+        let raycaster = new THREE.Raycaster();
+        let mouse = new THREE.Vector2();
+        let hoveredMesh = null;
+
+        // Shape data
+        const shapes = [
+            { name: 'مکعب', nameEn: 'cube', color: 0x00ff88 },
+            { name: 'کره', nameEn: 'sphere', color: 0xff0066 },
+            { name: 'حلقه', nameEn: 'torus', color: 0x6600ff },
+            { name: 'مخروط', nameEn: 'cone', color: 0xffaa00 },
+            { name: 'استوانه', nameEn: 'cylinder', color: 0x00aaff },
+            { name: 'اکتاهدرون', nameEn: 'octahedron', color: 0xff6600 }
+        ];
+
+        function init() {
+            // Set body height dynamically, increased to 300vh per shape for slower transition
+            document.body.style.height = `${shapes.length * 300}vh`;
+
+            // Scene
+            scene = new THREE.Scene();
+            scene.fog = new THREE.Fog(0x0a0a0a, 10, 50);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 5;
+            camera.position.y = 0; // Start at 0
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0x0a0a0a, 0.1);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+            document.getElementById('container').appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(5, 5, 5);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            scene.add(directionalLight);
+
+            const pointLight = new THREE.PointLight(0x00ffff, 0.8, 50);
+            pointLight.position.set(-5, 5, -5);
+            scene.add(pointLight);
+
+            // Create all shapes at different y positions, reversed direction
+            for (let i = 0; i < shapes.length; i++) {
+                const shape = shapes[i];
+                const geometry = createGeometry(shape.nameEn);
+                const material = new THREE.MeshPhongMaterial({ 
+                    color: shape.color,
+                    shininess: 100,
+                    transparent: true,
+                    opacity: 1
+                });
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                mesh.position.y = -i * sectionHeight; // Negative y for reverse scroll direction
+                scene.add(mesh);
+                meshes.push(mesh);
+
+                // Create invisible hitbox with larger radius
+                const hitboxGeometry = new THREE.SphereGeometry(3, 32, 32); // Larger sphere for bigger hover area
+                const hitboxMaterial = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0 });
+                const hitbox = new THREE.Mesh(hitboxGeometry, hitboxMaterial);
+                hitbox.position.y = mesh.position.y;
+                hitbox.userData.mainMesh = mesh; // Link to main mesh
+                scene.add(hitbox);
+                hitboxes.push(hitbox);
+            }
+
+            // Animation loop
+            animate();
+
+            // Event listeners
+            window.addEventListener('resize', onWindowResize);
+            window.addEventListener('scroll', onScroll);
+            window.addEventListener('mousemove', onMouseMove);
+        }
+
+        function createGeometry(shapeType) {
+            switch(shapeType) {
+                case 'cube':
+                    return new THREE.BoxGeometry(2, 2, 2);
+                case 'sphere':
+                    return new THREE.SphereGeometry(1.5, 32, 32);
+                case 'torus':
+                    return new THREE.TorusGeometry(1.2, 0.4, 16, 100);
+                case 'cone':
+                    return new THREE.ConeGeometry(1.5, 3, 32);
+                case 'cylinder':
+                    return new THREE.CylinderGeometry(1.5, 1.5, 3, 32);
+                case 'octahedron':
+                    return new THREE.OctahedronGeometry(2);
+                default:
+                    return new THREE.BoxGeometry(2, 2, 2);
+            }
+        }
+
+        function onMouseMove(event) {
+            // Calculate mouse position in normalized device coordinates (-1 to +1) for both axes
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
+
+            // Update the ray with the camera and mouse position
+            raycaster.setFromCamera(mouse, camera);
+
+            // Calculate objects intersecting the picking ray using hitboxes
+            const intersects = raycaster.intersectObjects(hitboxes);
+
+            if (intersects.length > 0) {
+                hoveredMesh = intersects[0].object.userData.mainMesh;
+                renderer.domElement.style.cursor = 'pointer';
+            } else {
+                hoveredMesh = null;
+                renderer.domElement.style.cursor = 'auto';
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Rotate all shapes slowly, but adjust direction based on hover and mouse position (reversed)
+            meshes.forEach(mesh => {
+                if (mesh === hoveredMesh) {
+                    // Reversed rotation towards mouse direction
+                    mesh.rotation.x += -mouse.y * 0.02; // Reversed vertical
+                    mesh.rotation.y += -mouse.x * 0.02; // Reversed horizontal
+                } else {
+                    // Normal slow rotation
+                    mesh.rotation.x += 0.005;
+                    mesh.rotation.y += 0.01;
+                }
+            });
+
+            renderer.render(scene, camera);
+        }
+
+        function onScroll() {
+            const scrollY = window.scrollY;
+            const viewportHeight = window.innerHeight;
+            const totalScrollHeight = document.body.scrollHeight - viewportHeight;
+            const scrollPercent = scrollY / totalScrollHeight;
+            const totalHeight3D = (shapes.length - 1) * sectionHeight;
+            camera.position.y = -scrollPercent * totalHeight3D; // Negative for reverse direction
+
+            // Update current index based on camera position (adjusted for negative y)
+            const newIndex = Math.min(Math.floor(-camera.position.y / sectionHeight), shapes.length - 1);
+            if (newIndex !== currentShapeIndex) {
+                currentShapeIndex = newIndex;
+                document.getElementById('info').textContent = `شکل ${newIndex + 1}: ${shapes[newIndex].name}`;
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Initialize the scene
+        init();
+
+        // Add particles for background effect
+        function addParticles() {
+            const particlesGeometry = new THREE.BufferGeometry();
+            const particlesCount = 1000;
+            const posArray = new Float32Array(particlesCount * 3);
+
+            for (let i = 0; i < particlesCount * 3; i++) {
+                posArray[i] = (Math.random() - 0.5) * 50;
+            }
+
+            particlesGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+
+            const particlesMaterial = new THREE.PointsMaterial({
+                size: 0.005,
+                color: 0xffffff,
+                transparent: true,
+                opacity: 0.8
+            });
+
+            const particlesMesh = new THREE.Points(particlesGeometry, particlesMaterial);
+            scene.add(particlesMesh);
+
+            // Animate particles
+            function animateParticles() {
+                particlesMesh.rotation.y += 0.0005;
+                requestAnimationFrame(animateParticles);
+            }
+            animateParticles();
+        }
+
+        addParticles();
+    </script>
+</body>
+</html>
